@@ -1,6 +1,9 @@
 //! Generic, mapping-free lifting of non-RDF sources into a structural RDF graph.
 //! Model-specific transformation is then done with SHACL-AF rules.
 
+use std::str::FromStr;
+
+use oxsdatatypes::{Date, DateTime};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -245,6 +248,14 @@ impl Inferred {
             Self::Double => {
                 a.parse::<f64>().unwrap_or(f64::NAN) < b.parse::<f64>().unwrap_or(f64::NAN)
             }
+            Self::Date => match (Date::from_str(a), Date::from_str(b)) {
+                (Ok(x), Ok(y)) => x < y,
+                _ => a < b,
+            },
+            Self::DateTime => match (DateTime::from_str(a), DateTime::from_str(b)) {
+                (Ok(x), Ok(y)) => x < y,
+                _ => a < b,
+            },
             _ => a < b,
         }
     }
