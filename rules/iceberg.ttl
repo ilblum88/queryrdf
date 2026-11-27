@@ -121,7 +121,8 @@ ice:snapshotRule a sh:SPARQLRule ;
       OPTIONAL { ?s j:manifest-list ?ml }
       OPTIONAL { ?s j:sequence-number ?seq }
       OPTIONAL { ?s j:schema-id ?ssid }
-      OPTIONAL { ?s j:parent-snapshot-id ?pid }
+      # Expired parents keep their id on the child but are no longer listed.
+      OPTIONAL { ?s j:parent-snapshot-id ?pid . $this j:snapshots/j:snapshot-id ?pid }
       BIND(ice:childIri(?table, "schema", ?ssid) AS ?schema)
       BIND(ice:childIri(?table, "snapshot", ?pid) AS ?parent)
     }""" .
