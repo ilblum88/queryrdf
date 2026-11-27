@@ -293,6 +293,7 @@ pub fn lift_csv(bytes: &[u8], options: LiftOptions) -> Result<Vec<Triple>> {
         ),
     ];
     let mut types = Vec::new();
+    let mut required = Vec::new();
     for (i, name) in headers.iter().enumerate() {
         let values: Vec<&str> = records
             .iter()
@@ -304,6 +305,7 @@ pub fn lift_csv(bytes: &[u8], options: LiftOptions) -> Result<Vec<Triple>> {
             .find(|t| !values.is_empty() && values.iter().all(|v| t.accepts(v)))
             .unwrap_or(Inferred::String);
         types.push(inferred);
+        required.push(values.len() == records.len());
         let col: NamedOrBlankNode = BlankNode::default().into();
         out.push(Triple::new(doc.clone(), qs::COLUMN, col.clone()));
         out.push(Triple::new(col.clone(), rdf::TYPE, qs::COLUMN_CLASS));
@@ -352,8 +354,8 @@ pub fn lift_csv(bytes: &[u8], options: LiftOptions) -> Result<Vec<Triple>> {
     }
     let signature: Vec<String> = headers
         .iter()
-        .zip(&types)
-        .map(|(name, t)| format!("{name}:{}", t.datatype().as_str()))
+        .zip(types.iter().zip(&required))
+        .map(|(name, (t, req))| format!("{name}:{}:{req}", t.datatype().as_str()))
         .collect();
     out.push(Triple::new(
         doc.clone(),
