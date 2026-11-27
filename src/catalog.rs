@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use oxigraph::model::*;
 use oxigraph::store::Store;
 
@@ -70,7 +70,7 @@ impl Catalog {
         let persist = Persist::open(path)?;
         let (version, triples) = persist.load()?;
         let data = graph::store_from(triples)?;
-        let shapes = load_shapes(&persist)?;
+        let shapes = load_shapes(&persist, None)?;
         Ok(Self {
             persist,
             data,
@@ -266,18 +266,19 @@ impl Catalog {
         turtle: &str,
         force: bool,
     ) -> Result<ValidationReport> {
-        let extra = ShapesGraph::from_turtle(turtle)?;
-        let report = Validator::new(&extra, &self.data).validate()?;
+        // Shapes files may extend existing shapes, so check the merged shapes graph.
+        let merged = load_shapes(&self.persist, Some((name, turtle)))?;
+        let report = Validator::new(&merged, &self.data).validate()?;
         if report.conforms() || force {
             self.persist.put_shapes(name, turtle)?;
-            self.shapes = load_shapes(&self.persist)?;
+            self.shapes = merged;
         }
         Ok(report)
     }
 
     pub fn remove_shapes(&mut self, name: &str) -> Result<bool> {
         let removed = self.persist.remove_shapes(name)?;
-        self.shapes = load_shapes(&self.persist)?;
+        self.shapes = load_shapes(&self.persist, None)?;
         Ok(removed)
     }
 
@@ -291,11 +292,17 @@ impl Catalog {
     }
 }
 
-fn load_shapes(persist: &Persist) -> Result<ShapesGraph> {
+/// Builtin plus persisted shapes; `replacement` overrides (or adds) one persisted shapes set.
+fn load_shapes(persist: &Persist, replacement: Option<(&str, &str)>) -> Result<ShapesGraph> {
     let g = graph::new_store();
     graph::load_turtle(&g, CATALOG_SHAPES)?;
-    for (_, turtle) in persist.shapes()? {
-        graph::load_turtle(&g, &turtle)?;
+    for (name, turtle) in persist.shapes()? {
+        if replacement.is_none_or(|(n, _)| n != name) {
+            graph::load_turtle(&g, &turtle)?;
+        }
+    }
+    if let Some((name, turtle)) = replacement {
+        graph::load_turtle(&g, turtle).with_context(|| format!("in shapes '{name}'"))?;
     }
     ShapesGraph::from_store(g)
 }
