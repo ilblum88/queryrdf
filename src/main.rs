@@ -243,12 +243,19 @@ fn run(cli: Cli) -> Result<ExitCode> {
             dry_run,
         } => {
             let rules = load_rules(&rules)?;
-            let source = source_graph(&file, format.as_deref(), rows)?;
-            let source_nodes: std::collections::HashSet<Term> = graph::triples(&source)
-                .into_iter()
-                .flat_map(|t| [t.subject.into(), t.object])
-                .filter(|t: &Term| matches!(t, Term::BlankNode(_)))
-                .collect();
+            let source_format = SourceFormat::detect(&file, format.as_deref())?;
+            let source = lift::lift_file(&file, source_format, LiftOptions { rows })?;
+            // Blank nodes lifted from JSON/CSV are temporary structure; in RDF sources they are data.
+            let source_nodes: std::collections::HashSet<Term> =
+                if matches!(source_format, SourceFormat::Rdf(_)) {
+                    Default::default()
+                } else {
+                    graph::triples(&source)
+                        .into_iter()
+                        .flat_map(|t| [t.subject.into(), t.object])
+                        .filter(|t: &Term| matches!(t, Term::BlankNode(_)))
+                        .collect()
+                };
             let work = graph::new_store();
             copy_into(&work, &source)?;
             if !isolated {
@@ -261,7 +268,6 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     ..Default::default()
                 },
             )?;
-            // Source structure (lifted blank nodes) never leaks into the catalog.
             let output: Vec<_> = inference
                 .produced
                 .into_iter()
