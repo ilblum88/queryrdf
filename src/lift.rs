@@ -242,6 +242,17 @@ impl Inferred {
         }
     }
 
+    /// Date/time values with and without a timezone are not mutually ordered, so such a column
+    /// has no well-defined bounds.
+    fn ordered(self, values: &[&str]) -> bool {
+        let has_tz = |v: &&str| match self {
+            Self::Date => Date::from_str(v).is_ok_and(|d| d.timezone().is_some()),
+            Self::DateTime => DateTime::from_str(v).is_ok_and(|d| d.timezone().is_some()),
+            _ => true,
+        };
+        values.iter().all(has_tz) || !values.iter().any(has_tz)
+    }
+
     fn less(self, a: &str, b: &str) -> bool {
         match self {
             Self::Integer => a.parse::<i64>().ok() < b.parse::<i64>().ok(),
@@ -339,7 +350,7 @@ pub fn lift_csv(bytes: &[u8], options: LiftOptions) -> Result<Vec<Triple>> {
                 max = Some(v);
             }
         }
-        if let (Some(min), Some(max)) = (min, max) {
+        if let (Some(min), Some(max), true) = (min, max, inferred.ordered(&values)) {
             out.push(Triple::new(
                 col.clone(),
                 qs::MIN_VALUE,
