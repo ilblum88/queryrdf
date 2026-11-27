@@ -1,0 +1,42 @@
+{
+  "format-version": 2,
+  "table-uuid": "9c12d441-03fe-4693-9a96-a0705ddf69c1",
+  "location": "s3://warehouse/sales/orders",
+  "last-sequence-number": 1,
+  "last-updated-ms": 1730000000000,
+  "last-column-id": 4,
+  "current-schema-id": 0,
+  "schemas": [
+    {
+      "type": "struct",
+      "schema-id": 0,
+      "fields": [
+        { "id": 1, "name": "order_id", "required": true, "type": "long" },
+        { "id": 2, "name": "customer_email", "required": false, "type": "string" },
+        { "id": 3, "name": "order_date", "required": true, "type": "date" },
+        { "id": 4, "name": "total", "required": true, "type": "decimal(10, 2)" }
+      ]
+    }
+  ],
+  "default-spec-id": 0,
+  "partition-specs": [
+    { "spec-id": 0, "fields": [ { "name": "order_date_day", "transform": "day", "source-id": 3, "field-id": 1000 } ] }
+  ],
+  "last-partition-id": 1000,
+  "default-sort-order-id": 0,
+  "sort-orders": [ { "order-id": 0, "fields": [] } ],
+  "properties": { "owner": "lenny", "write.format.default": "parquet" },
+  "current-snapshot-id": 3051729675574597004,
+  "snapshots": [
+    {
+      "sequence-number": 1,
+      "snapshot-id": 3051729675574597004,
+      "timestamp-ms": 1730000000000,
+      "summary": { "operation": "append", "added-records": "1000" },
+      "manifest-list": "s3://warehouse/sales/orders/metadata/snap-3051729675574597004-1.avro",
+      "schema-id": 0
+    }
+  ],
+  "snapshot-log": [ { "timestamp-ms": 1730000000000, "snapshot-id": 3051729675574597004 } ],
+  "metadata-log": []
+}

@@ -1,0 +1,53 @@
+# SHACL-AF rules exporting the catalog as DCAT 3 + PROV-O.
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix qc:   <https://w3id.org/queryrdf/catalog#> .
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dct:  <http://purl.org/dc/terms/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix ex:   <https://w3id.org/queryrdf/rules/dcat#> .
+
+ex:prefixes sh:declare
+  [ sh:prefix "qc" ;   sh:namespace "https://w3id.org/queryrdf/catalog#"^^xsd:anyURI ] ,
+  [ sh:prefix "dcat" ; sh:namespace "http://www.w3.org/ns/dcat#"^^xsd:anyURI ] ,
+  [ sh:prefix "dct" ;  sh:namespace "http://purl.org/dc/terms/"^^xsd:anyURI ] .
+
+ex:TableShape a sh:NodeShape ;
+  sh:targetClass qc:Table ;
+  sh:rule
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate rdf:type ; sh:object dcat:Dataset ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate dct:title ; sh:object [ sh:path qc:name ] ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate dct:identifier ; sh:object [ sh:path qc:uuid ] ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate dcat:theme ;
+      sh:object [ sh:path ( qc:currentSchema qc:field qc:concept ) ] ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate dct:isPartOf ;
+      sh:object [ sh:path qc:inNamespace ] ] ,
+    [ a sh:SPARQLRule ; sh:prefixes ex:prefixes ;
+      sh:construct """
+        CONSTRUCT {
+          $this dcat:distribution ?file .
+          ?file a dcat:Distribution ; dcat:accessURL ?url ; dcat:byteSize ?size ; dct:format ?format .
+        } WHERE {
+          $this qc:currentSnapshot/qc:parentSnapshot*/qc:dataFile ?file .
+          ?file qc:filePath ?path ; qc:fileFormat ?format .
+          OPTIONAL { ?file qc:fileSizeBytes ?size }
+          BIND(IRI(IF(REGEX(?path, "^[a-z][a-z0-9+.-]*:"), ?path, CONCAT("file://", ?path))) AS ?url)
+        }""" ] .
+
+ex:NamespaceShape a sh:NodeShape ;
+  sh:targetClass qc:Namespace ;
+  sh:rule
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate rdf:type ; sh:object dcat:Catalog ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate dct:title ; sh:object [ sh:path qc:name ] ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate dcat:dataset ;
+      sh:object [ sh:path [ sh:inversePath qc:inNamespace ] ] ] .
+
+ex:SnapshotShape a sh:NodeShape ;
+  sh:targetClass qc:Snapshot ;
+  sh:rule
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate rdf:type ; sh:object prov:Entity ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate prov:generatedAtTime ; sh:object [ sh:path qc:timestamp ] ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate prov:wasRevisionOf ; sh:object [ sh:path qc:parentSnapshot ] ] ,
+    [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate prov:specializationOf ;
+      sh:object [ sh:path [ sh:inversePath qc:snapshot ] ] ] .

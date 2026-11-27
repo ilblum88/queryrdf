@@ -1,0 +1,171 @@
+# SHACL-AF rules mapping a lifted Iceberg table metadata.json (format v2/v3) into the catalog model.
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix qc:   <https://w3id.org/queryrdf/catalog#> .
+@prefix qs:   <https://w3id.org/queryrdf/source#> .
+@prefix j:    <https://w3id.org/queryrdf/json#> .
+@prefix ice:  <https://w3id.org/queryrdf/rules/iceberg#> .
+
+ice:prefixes sh:declare
+  [ sh:prefix "qc" ;  sh:namespace "https://w3id.org/queryrdf/catalog#"^^xsd:anyURI ] ,
+  [ sh:prefix "qs" ;  sh:namespace "https://w3id.org/queryrdf/source#"^^xsd:anyURI ] ,
+  [ sh:prefix "j" ;   sh:namespace "https://w3id.org/queryrdf/json#"^^xsd:anyURI ] ,
+  [ sh:prefix "qf" ;  sh:namespace "https://w3id.org/queryrdf/function#"^^xsd:anyURI ] ,
+  [ sh:prefix "ice" ; sh:namespace "https://w3id.org/queryrdf/rules/iceberg#"^^xsd:anyURI ] ,
+  [ sh:prefix "xsd" ; sh:namespace "http://www.w3.org/2001/XMLSchema#"^^xsd:anyURI ] .
+
+# IRI minting, shared by node expressions and SPARQL rules.
+ice:tableIri a sh:SPARQLFunction ;
+  sh:parameter [ sh:path ice:uuid ; sh:datatype xsd:string ] ;
+  sh:select """SELECT (IRI(CONCAT("urn:queryrdf:table:", LCASE($uuid))) AS ?result) WHERE {}""" .
+
+ice:childIri a sh:SPARQLFunction ;
+  sh:parameter [ sh:path ice:parent ; sh:order 0 ] ;
+  sh:parameter [ sh:path ice:kind ; sh:order 1 ] ;
+  sh:parameter [ sh:path ice:id ; sh:order 2 ] ;
+  sh:select """SELECT (IRI(CONCAT(STR($parent), "/", $kind, "/", STR($id))) AS ?result) WHERE {}""" .
+
+ice:IcebergMetadata a sh:NodeShape ;
+  sh:property [ sh:path j:format-version ; sh:minCount 1 ] ;
+  sh:property [ sh:path j:table-uuid ; sh:minCount 1 ] ;
+  sh:property [ sh:path j:location ; sh:minCount 1 ] .
+
+ice:MetadataShape a sh:NodeShape ;
+  sh:targetClass qs:Document ;
+  sh:rule ice:mintTable, ice:tableRule, ice:formatVersion, ice:schemaRule, ice:fieldRule,
+          ice:snapshotRule, ice:currentSnapshotRule, ice:partitionRule, ice:propertyRule .
+
+# Stage 0: annotate the source document with the minted table IRI (node expression + function).
+ice:mintTable a sh:TripleRule ;
+  sh:order 0 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:subject sh:this ;
+  sh:predicate ice:table ;
+  sh:object [ ice:tableIri ( [ sh:path j:table-uuid ] ) ] .
+
+ice:tableRule a sh:SPARQLRule ;
+  sh:order 1 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:prefixes ice:prefixes ;
+  sh:construct """
+    CONSTRUCT {
+      ?ns a qc:Namespace ; qc:name ?nsName .
+      ?table a qc:Table ; qc:name ?name ; qc:inNamespace ?ns ; qc:uuid ?uuid ; qc:location ?loc .
+    } WHERE {
+      $this ice:table ?table ; j:table-uuid ?uuid ; j:location ?loc .
+      BIND(REPLACE(?loc, "^.*/([^/]+)/?$", "$1") AS ?name)
+      BIND(IF(REGEX(?loc, "/[^/]+/[^/]+/?$"), REPLACE(?loc, "^.*/([^/]+)/[^/]+/?$", "$1"), "default") AS ?nsName)
+      BIND(IRI(CONCAT("urn:queryrdf:namespace:", ENCODE_FOR_URI(?nsName))) AS ?ns)
+    }""" .
+
+ice:formatVersion a sh:TripleRule ;
+  sh:order 1 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:subject [ sh:path ice:table ] ;
+  sh:predicate qc:formatVersion ;
+  sh:object [ sh:path j:format-version ] .
+
+ice:schemaRule a sh:SPARQLRule ;
+  sh:order 2 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:prefixes ice:prefixes ;
+  sh:construct """
+    CONSTRUCT {
+      ?table qc:schema ?schema . ?schema a qc:Schema ; qc:schemaId ?sid .
+      ?table qc:currentSchema ?current .
+    } WHERE {
+      $this ice:table ?table ; j:schemas ?s ; j:current-schema-id ?cid .
+      ?s j:schema-id ?sid .
+      BIND(ice:childIri(?table, "schema", ?sid) AS ?schema)
+      BIND(ice:childIri(?table, "schema", ?cid) AS ?current)
+    }""" .
+
+ice:fieldRule a sh:SPARQLRule ;
+  sh:order 3 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:prefixes ice:prefixes ;
+  sh:construct """
+    CONSTRUCT {
+      ?schema qc:field ?field .
+      ?field a qc:Field ; qc:fieldId ?fid ; qc:name ?fname ; qc:dataType ?type ;
+             qc:required ?req ; qc:position ?pos .
+    } WHERE {
+      $this ice:table ?table ; j:schemas ?s .
+      ?s j:schema-id ?sid ; j:fields ?f .
+      ?f j:id ?fid ; j:name ?fname ; j:required ?req ; j:type ?t ; qs:index ?idx .
+      OPTIONAL { ?t j:type ?nested }
+      BIND(IF(isLiteral(?t), STR(?t), STR(?nested)) AS ?type)
+      BIND(?idx + 1 AS ?pos)
+      BIND(ice:childIri(?table, "schema", ?sid) AS ?schema)
+      BIND(ice:childIri(?schema, "field", ?fid) AS ?field)
+    }""" .
+
+ice:snapshotRule a sh:SPARQLRule ;
+  sh:order 4 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:prefixes ice:prefixes ;
+  sh:construct """
+    CONSTRUCT {
+      ?table qc:snapshot ?snap .
+      ?snap a qc:Snapshot ; qc:snapshotId ?id ; qc:timestamp ?ts ; qc:operation ?op ;
+            qc:manifestList ?ml ; qc:sequenceNumber ?seq ; qc:schema ?schema ;
+            qc:parentSnapshot ?parent ; qc:addedRecords ?added .
+    } WHERE {
+      $this ice:table ?table ; j:snapshots ?s .
+      ?s j:snapshot-id ?id ; j:timestamp-ms ?ms .
+      BIND(ice:childIri(?table, "snapshot", ?id) AS ?snap)
+      BIND(qf:epochMillisToDateTime(?ms) AS ?ts)
+      OPTIONAL { ?s j:summary/j:operation ?op }
+      OPTIONAL { ?s j:summary/j:added-records ?addedStr BIND(xsd:integer(?addedStr) AS ?added) }
+      OPTIONAL { ?s j:manifest-list ?ml }
+      OPTIONAL { ?s j:sequence-number ?seq }
+      OPTIONAL { ?s j:schema-id ?ssid }
+      OPTIONAL { ?s j:parent-snapshot-id ?pid }
+      BIND(ice:childIri(?table, "schema", ?ssid) AS ?schema)
+      BIND(ice:childIri(?table, "snapshot", ?pid) AS ?candidate)
+      # Expired parents keep their id on the child: link only parents listed here or already cataloged.
+      BIND(IF(EXISTS { ?doc ice:table ?table ; j:snapshots/j:snapshot-id ?pid }
+              || EXISTS { ?candidate a qc:Snapshot }, ?candidate, ?none) AS ?parent)
+    }""" .
+
+ice:currentSnapshotRule a sh:SPARQLRule ;
+  sh:order 5 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:prefixes ice:prefixes ;
+  sh:construct """
+    CONSTRUCT { ?table qc:currentSnapshot ?snap } WHERE {
+      $this ice:table ?table ; j:current-snapshot-id ?id . FILTER(?id != -1)
+      BIND(ice:childIri(?table, "snapshot", ?id) AS ?snap)
+    }""" .
+
+ice:partitionRule a sh:SPARQLRule ;
+  sh:order 6 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:prefixes ice:prefixes ;
+  sh:construct """
+    CONSTRUCT {
+      ?table qc:partitionField ?pf .
+      ?pf a qc:PartitionField ; qc:name ?name ; qc:transform ?transform ; qc:sourceField ?field .
+    } WHERE {
+      $this ice:table ?table ; j:default-spec-id ?specId ; j:partition-specs ?spec ; j:current-schema-id ?cid .
+      ?spec j:spec-id ?specId ; j:fields ?p .
+      ?p j:name ?name ; j:transform ?transform ; j:source-id ?src ; j:field-id ?pfid .
+      BIND(ice:childIri(?table, "partition", ?pfid) AS ?pf)
+      BIND(ice:childIri(ice:childIri(?table, "schema", ?cid), "field", ?src) AS ?field)
+    }""" .
+
+ice:propertyRule a sh:SPARQLRule ;
+  sh:order 7 ;
+  sh:condition ice:IcebergMetadata ;
+  sh:prefixes ice:prefixes ;
+  sh:construct """
+    CONSTRUCT {
+      ?table qc:property ?prop . ?prop qc:key ?key ; qc:value ?value .
+    } WHERE {
+      $this ice:table ?table ; j:properties ?props .
+      ?props ?k ?value .
+      FILTER(STRSTARTS(STR(?k), STR(j:)))
+      BIND(STRAFTER(STR(?k), STR(j:)) AS ?key)
+      BIND(ice:childIri(?table, "property", ENCODE_FOR_URI(?key)) AS ?prop)
+    }""" .

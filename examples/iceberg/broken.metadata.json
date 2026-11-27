@@ -1,0 +1,18 @@
+{
+  "format-version": 2,
+  "table-uuid": "0f7d2a9e-1b8c-4d3e-9f60-123456789abc",
+  "location": "s3://warehouse/sales/returns",
+  "current-schema-id": 0,
+  "schemas": [
+    {
+      "type": "struct",
+      "schema-id": 0,
+      "fields": [
+        { "id": 1, "name": "return_id", "required": true, "type": "long" },
+        { "id": 1, "name": "reason", "required": false, "type": "varchar" }
+      ]
+    }
+  ],
+  "current-snapshot-id": 42,
+  "snapshots": []
+}

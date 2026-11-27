@@ -1,0 +1,107 @@
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix qc:   <https://w3id.org/queryrdf/catalog#> .
+@prefix qcs:  <https://w3id.org/queryrdf/shapes#> .
+
+qcs:prefixes sh:declare [ sh:prefix "qc" ; sh:namespace "https://w3id.org/queryrdf/catalog#"^^xsd:anyURI ] .
+
+qcs:NamespaceShape a sh:NodeShape ;
+  sh:targetClass qc:Namespace ;
+  sh:property [ sh:path qc:name ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                sh:pattern "^[A-Za-z_][A-Za-z0-9_\\-]*$" ] ;
+  sh:property [ sh:path qc:inCatalog ; sh:maxCount 1 ; sh:class qc:Catalog ] .
+
+qcs:TableShape a sh:NodeShape ;
+  sh:targetClass qc:Table ;
+  sh:property [ sh:path qc:name ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                sh:pattern "^[A-Za-z_][A-Za-z0-9_\\-]*$" ] ;
+  sh:property [ sh:path qc:inNamespace ; sh:minCount 1 ; sh:maxCount 1 ; sh:class qc:Namespace ] ;
+  sh:property [ sh:path qc:location ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path qc:uuid ; sh:maxCount 1 ;
+                sh:pattern "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" ] ;
+  sh:property [ sh:path qc:formatVersion ; sh:maxCount 1 ; sh:in ( 1 2 3 ) ] ;
+  sh:property [ sh:path qc:schema ; sh:minCount 1 ; sh:class qc:Schema ] ;
+  sh:property [ sh:path qc:currentSchema ; sh:minCount 1 ; sh:maxCount 1 ; sh:class qc:Schema ] ;
+  sh:property [ sh:path qc:snapshot ; sh:class qc:Snapshot ] ;
+  sh:property [ sh:path qc:currentSnapshot ; sh:maxCount 1 ; sh:class qc:Snapshot ] ;
+  sh:sparql [
+    sh:message "current schema {?value} is not one of the table's schemas" ;
+    sh:prefixes qcs:prefixes ;
+    sh:select """SELECT $this ?value WHERE {
+      $this qc:currentSchema ?value . FILTER NOT EXISTS { $this qc:schema ?value } }""" ] ;
+  sh:sparql [
+    sh:message "current snapshot {?value} is not one of the table's snapshots" ;
+    sh:prefixes qcs:prefixes ;
+    sh:select """SELECT $this ?value WHERE {
+      $this qc:currentSnapshot ?value . FILTER NOT EXISTS { $this qc:snapshot ?value } }""" ] ;
+  sh:sparql [
+    sh:message "table name {?value} is not unique in its namespace" ;
+    sh:prefixes qcs:prefixes ;
+    sh:select """SELECT $this ?value WHERE {
+      $this qc:name ?value ; qc:inNamespace ?ns .
+      ?other qc:name ?value ; qc:inNamespace ?ns . FILTER(?other != $this) }""" ] ;
+  sh:sparql [
+    sh:message "schema id {?id} is used by more than one schema" ;
+    sh:prefixes qcs:prefixes ;
+    sh:select """SELECT $this ?id WHERE {
+      $this qc:schema ?a, ?b . ?a qc:schemaId ?id . ?b qc:schemaId ?id . FILTER(?a != ?b) }""" ] ;
+  sh:sparql [
+    sh:message "snapshot id {?id} is used by more than one snapshot" ;
+    sh:prefixes qcs:prefixes ;
+    sh:select """SELECT $this ?id WHERE {
+      $this qc:snapshot ?a, ?b . ?a qc:snapshotId ?id . ?b qc:snapshotId ?id . FILTER(?a != ?b) }""" ] .
+
+qcs:SchemaShape a sh:NodeShape ;
+  sh:targetClass qc:Schema ;
+  sh:property [ sh:path qc:schemaId ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ] ;
+  sh:property [ sh:path qc:field ; sh:class qc:Field ] ;
+  sh:sparql [
+    sh:message "field id {?id} is not unique within the schema" ;
+    sh:prefixes qcs:prefixes ;
+    sh:select """SELECT $this ?id WHERE {
+      $this qc:field ?a, ?b . ?a qc:fieldId ?id . ?b qc:fieldId ?id . FILTER(?a != ?b) }""" ] ;
+  sh:sparql [
+    sh:message "field name {?name} is not unique within the schema" ;
+    sh:prefixes qcs:prefixes ;
+    sh:select """SELECT $this ?name WHERE {
+      $this qc:field ?a, ?b . ?a qc:name ?name . ?b qc:name ?name . FILTER(?a != ?b) }""" ] .
+
+qcs:FieldShape a sh:NodeShape ;
+  sh:targetClass qc:Field ;
+  sh:property [ sh:path qc:fieldId ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
+  sh:property [ sh:path qc:name ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ; sh:minLength 1 ] ;
+  sh:property [ sh:path qc:dataType ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                sh:pattern "^(boolean|int|long|float|double|date|time|timestamp|timestamptz|timestamp_ns|timestamptz_ns|string|uuid|binary|variant|unknown|geometry|geography|struct|list|map|decimal\\(\\d+,\\s*\\d+\\)|fixed\\[\\d+\\])$" ;
+                sh:message "unsupported Iceberg/DuckLake data type" ] ;
+  sh:property [ sh:path qc:required ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:boolean ] ;
+  sh:property [ sh:path qc:position ; sh:maxCount 1 ; sh:datatype xsd:integer ] ;
+  sh:property [ sh:path qc:concept ; sh:nodeKind sh:IRI ] .
+
+qcs:SnapshotShape a sh:NodeShape ;
+  sh:targetClass qc:Snapshot ;
+  sh:property [ sh:path qc:snapshotId ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ] ;
+  sh:property [ sh:path qc:timestamp ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+  sh:property [ sh:path qc:operation ; sh:maxCount 1 ; sh:in ( "append" "overwrite" "delete" "replace" ) ] ;
+  sh:property [ sh:path qc:parentSnapshot ; sh:maxCount 1 ; sh:class qc:Snapshot ] ;
+  sh:property [ sh:path qc:schema ; sh:maxCount 1 ; sh:class qc:Schema ] ;
+  sh:property [ sh:path qc:dataFile ; sh:class qc:DataFile ] ;
+  sh:sparql [
+    sh:message "parent snapshot {?value} is newer than its child" ;
+    sh:prefixes qcs:prefixes ;
+    sh:select """SELECT $this ?value WHERE {
+      $this qc:parentSnapshot ?value ; qc:timestamp ?t . ?value qc:timestamp ?pt . FILTER(?pt > ?t) }""" ] .
+
+qcs:DataFileShape a sh:NodeShape ;
+  sh:targetClass qc:DataFile ;
+  sh:property [ sh:path qc:filePath ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path qc:fileFormat ; sh:minCount 1 ; sh:maxCount 1 ; sh:in ( "parquet" "avro" "orc" "csv" "json" ) ] ;
+  sh:property [ sh:path qc:recordCount ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
+  sh:property [ sh:path qc:fileSizeBytes ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
+  sh:property [ sh:path qc:columnStats ; sh:class qc:ColumnStats ] .
+
+qcs:ColumnStatsShape a sh:NodeShape ;
+  sh:targetClass qc:ColumnStats ;
+  sh:property [ sh:path qc:column ; sh:minCount 1 ; sh:maxCount 1 ; sh:class qc:Field ] ;
+  sh:property [ sh:path qc:nullCount ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
+  sh:property [ sh:path qc:minValue ; sh:maxCount 1 ; sh:lessThanOrEquals qc:maxValue ] ;
+  sh:property [ sh:path qc:maxValue ; sh:maxCount 1 ] .

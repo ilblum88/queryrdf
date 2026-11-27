@@ -1,0 +1,35 @@
+# SHACL-AF rules adding semantic annotations (qc:concept) to fields by name.
+@prefix sh:     <http://www.w3.org/ns/shacl#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@prefix qc:     <https://w3id.org/queryrdf/catalog#> .
+@prefix schema: <https://schema.org/> .
+@prefix ann:    <https://w3id.org/queryrdf/rules/annotate#> .
+
+ann:prefixes sh:declare
+  [ sh:prefix "qc" ;     sh:namespace "https://w3id.org/queryrdf/catalog#"^^xsd:anyURI ] ,
+  [ sh:prefix "schema" ; sh:namespace "https://schema.org/"^^xsd:anyURI ] .
+
+ann:Unannotated a sh:NodeShape ;
+  sh:property [ sh:path qc:concept ; sh:maxCount 0 ] .
+
+ann:FieldShape a sh:NodeShape ;
+  sh:targetClass qc:Field ;
+  sh:rule [
+    a sh:SPARQLRule ;
+    sh:condition ann:Unannotated ;
+    sh:prefixes ann:prefixes ;
+    sh:construct """
+      CONSTRUCT { $this qc:concept ?concept } WHERE {
+        $this qc:name ?name .
+        VALUES (?pattern ?concept) {
+          ("(^|_)e?mail$"                    schema:email)
+          ("(^|_)order_?id$"                 schema:orderNumber)
+          ("(^|_)customer_?(id|name)?$"      schema:customer)
+          ("(^|_)(price|amount|total)$"      schema:price)
+          ("(^|_)currency$"                  schema:priceCurrency)
+          ("(^|_)(qty|quantity)$"            schema:orderQuantity)
+          ("(^|_)(order_?date|created_?at|ts)$" schema:orderDate)
+          ("(^|_)country$"                   schema:addressCountry)
+        }
+        FILTER(REGEX(?name, ?pattern, "i"))
+      }""" ] .
