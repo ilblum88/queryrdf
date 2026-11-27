@@ -394,7 +394,6 @@ fn non_terminating_rules_fail_in_iterate_mode() {
             RuleOptions {
                 iterate: true,
                 max_iterations: 5,
-                ..Default::default()
             },
         )
         .unwrap_err();
