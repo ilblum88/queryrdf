@@ -1,0 +1,5 @@
+customer_id,email,country,signup_date,lifetime_value,active
+1,ada@example.com,UK,2024-01-03,1520.50,true
+2,grace@example.com,US,2024-02-11,980.00,true
+3,alan@example.com,UK,2024-03-27,,false
+4,linus@example.com,FI,2024-05-09,310.25,true

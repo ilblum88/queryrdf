@@ -1,0 +1,94 @@
+# SHACL-AF rules mapping a lifted CSV file into a table + append snapshot + data file + column stats.
+# Rules run over the source graph merged with the current catalog, so they can chain snapshots.
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix qc:   <https://w3id.org/queryrdf/catalog#> .
+@prefix qs:   <https://w3id.org/queryrdf/source#> .
+@prefix csvr: <https://w3id.org/queryrdf/rules/csv#> .
+
+csvr:prefixes sh:declare
+  [ sh:prefix "qc" ;   sh:namespace "https://w3id.org/queryrdf/catalog#"^^xsd:anyURI ] ,
+  [ sh:prefix "qs" ;   sh:namespace "https://w3id.org/queryrdf/source#"^^xsd:anyURI ] ,
+  [ sh:prefix "qf" ;   sh:namespace "https://w3id.org/queryrdf/function#"^^xsd:anyURI ] ,
+  [ sh:prefix "csvr" ; sh:namespace "https://w3id.org/queryrdf/rules/csv#"^^xsd:anyURI ] ,
+  [ sh:prefix "xsd" ;  sh:namespace "http://www.w3.org/2001/XMLSchema#"^^xsd:anyURI ] .
+
+csvr:CsvDocument a sh:NodeShape ;
+  sh:property [ sh:path qs:format ; sh:hasValue "csv" ] ;
+  sh:property [ sh:path qs:fileName ; sh:minCount 1 ] .
+
+csvr:DocumentShape a sh:NodeShape ;
+  sh:targetClass qs:Document ;
+  sh:rule csvr:mint, csvr:tableRule, csvr:fileFormat, csvr:fieldRule .
+
+# Stage 0: mint the IRIs once and attach them to the source document.
+csvr:mint a sh:SPARQLRule ;
+  sh:order 0 ;
+  sh:condition csvr:CsvDocument ;
+  sh:prefixes csvr:prefixes ;
+  sh:construct """
+    CONSTRUCT { $this csvr:table ?table ; csvr:schema ?schema ; csvr:snapshot ?snap ;
+                      csvr:snapshotId ?sid ; csvr:file ?file . }
+    WHERE {
+      $this qs:fileName ?name ; qs:sourceFile ?path ; qs:fileSizeBytes ?size ; qs:modified ?ts .
+      BIND(IRI(CONCAT("urn:queryrdf:table:default.", ENCODE_FOR_URI(?name))) AS ?table)
+      BIND(IRI(CONCAT(STR(?table), "/schema/0")) AS ?schema)
+      BIND(qf:hash64(CONCAT(?path, "|", STR(?size), "|", STR(?ts))) AS ?sid)
+      BIND(IRI(CONCAT(STR(?table), "/snapshot/", STR(?sid))) AS ?snap)
+      BIND(IRI(CONCAT(STR(?snap), "/file/0")) AS ?file)
+    }""" .
+
+csvr:tableRule a sh:SPARQLRule ;
+  sh:order 1 ;
+  sh:condition csvr:CsvDocument ;
+  sh:prefixes csvr:prefixes ;
+  sh:construct """
+    CONSTRUCT {
+      ?ns a qc:Namespace ; qc:name "default" .
+      ?table a qc:Table ; qc:name ?name ; qc:inNamespace ?ns ; qc:schema ?schema ;
+             qc:currentSchema ?schema ; qc:snapshot ?snap, ?old ; qc:currentSnapshot ?snap .
+      ?schema a qc:Schema ; qc:schemaId 0 .
+      ?snap a qc:Snapshot ; qc:snapshotId ?sid ; qc:timestamp ?ts ; qc:operation "append" ;
+            qc:schema ?schema ; qc:dataFile ?file ; qc:parentSnapshot ?parent .
+      ?file a qc:DataFile ; qc:filePath ?path ; qc:recordCount ?rows ; qc:fileSizeBytes ?size .
+    } WHERE {
+      $this csvr:table ?table ; csvr:schema ?schema ; csvr:snapshot ?snap ; csvr:snapshotId ?sid ;
+            csvr:file ?file ; qs:fileName ?name ; qs:sourceFile ?path ; qs:rowCount ?rows ;
+            qs:fileSizeBytes ?size ; qs:modified ?ts .
+      BIND(IRI("urn:queryrdf:namespace:default") AS ?ns)
+      OPTIONAL { ?table qc:snapshot ?old }
+      OPTIONAL { ?table qc:currentSnapshot ?parent FILTER(?parent != ?snap) }
+    }""" .
+
+csvr:fileFormat a sh:TripleRule ;
+  sh:order 1 ;
+  sh:condition csvr:CsvDocument ;
+  sh:subject [ sh:path csvr:file ] ;
+  sh:predicate qc:fileFormat ;
+  sh:object "csv" .
+
+csvr:fieldRule a sh:SPARQLRule ;
+  sh:order 2 ;
+  sh:condition csvr:CsvDocument ;
+  sh:prefixes csvr:prefixes ;
+  sh:construct """
+    CONSTRUCT {
+      ?schema qc:field ?field .
+      ?field a qc:Field ; qc:fieldId ?pos ; qc:name ?name ; qc:dataType ?type ;
+             qc:required ?req ; qc:position ?pos .
+      ?file qc:columnStats ?stats .
+      ?stats a qc:ColumnStats ; qc:column ?field ; qc:nullCount ?nulls ; qc:minValue ?min ; qc:maxValue ?max .
+    } WHERE {
+      $this csvr:schema ?schema ; csvr:file ?file ; qs:column ?c .
+      ?c qs:name ?name ; qs:position ?pos ; qs:inferredType ?xt ; qs:nullCount ?nulls .
+      OPTIONAL { ?c qs:minValue ?min }
+      OPTIONAL { ?c qs:maxValue ?max }
+      VALUES (?xt ?type) {
+        (xsd:integer "long") (xsd:double "double") (xsd:boolean "boolean")
+        (xsd:date "date") (xsd:dateTime "timestamp") (xsd:string "string")
+      }
+      BIND(?nulls = 0 AS ?req)
+      BIND(IRI(CONCAT(STR(?schema), "/field/", STR(?pos))) AS ?field)
+      BIND(IRI(CONCAT(STR(?file), "/stats/", STR(?pos))) AS ?stats)
+    }""" .
