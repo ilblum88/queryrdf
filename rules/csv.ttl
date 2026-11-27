@@ -29,11 +29,14 @@ csvr:mint a sh:SPARQLRule ;
   sh:prefixes csvr:prefixes ;
   sh:construct """
     CONSTRUCT { $this csvr:table ?table ; csvr:schema ?schema ; csvr:snapshot ?snap ;
-                      csvr:snapshotId ?sid ; csvr:file ?file . }
+                      csvr:schemaId ?schemaId ; csvr:snapshotId ?sid ; csvr:file ?file . }
     WHERE {
-      $this qs:fileName ?name ; qs:sourceFile ?path ; qs:fileSizeBytes ?size ; qs:modified ?ts .
+      $this qs:fileName ?name ; qs:sourceFile ?path ; qs:fileSizeBytes ?size ; qs:modified ?ts ;
+            qs:headerSignature ?sig .
       BIND(IRI(CONCAT("urn:queryrdf:table:default.", ENCODE_FOR_URI(?name))) AS ?table)
-      BIND(IRI(CONCAT(STR(?table), "/schema/0")) AS ?schema)
+      # A new schema version per distinct header/type signature; earlier snapshots keep theirs.
+      BIND(qf:hash64(?sig) AS ?schemaId)
+      BIND(IRI(CONCAT(STR(?table), "/schema/", STR(?schemaId))) AS ?schema)
       BIND(qf:hash64(CONCAT(?path, "|", STR(?size), "|", STR(?ts))) AS ?sid)
       BIND(IRI(CONCAT(STR(?table), "/snapshot/", STR(?sid))) AS ?snap)
       BIND(IRI(CONCAT(STR(?snap), "/file/0")) AS ?file)
@@ -46,18 +49,20 @@ csvr:tableRule a sh:SPARQLRule ;
   sh:construct """
     CONSTRUCT {
       ?ns a qc:Namespace ; qc:name "default" .
-      ?table a qc:Table ; qc:name ?name ; qc:inNamespace ?ns ; qc:schema ?schema ;
+      ?table a qc:Table ; qc:name ?name ; qc:inNamespace ?ns ; qc:schema ?schema, ?oldSchema ;
              qc:currentSchema ?schema ; qc:snapshot ?snap, ?old ; qc:currentSnapshot ?snap .
-      ?schema a qc:Schema ; qc:schemaId 0 .
+      ?schema a qc:Schema ; qc:schemaId ?schemaId .
       ?snap a qc:Snapshot ; qc:snapshotId ?sid ; qc:timestamp ?ts ; qc:operation "append" ;
             qc:schema ?schema ; qc:dataFile ?file ; qc:parentSnapshot ?parent .
       ?file a qc:DataFile ; qc:filePath ?path ; qc:recordCount ?rows ; qc:fileSizeBytes ?size .
     } WHERE {
-      $this csvr:table ?table ; csvr:schema ?schema ; csvr:snapshot ?snap ; csvr:snapshotId ?sid ;
+      $this csvr:table ?table ; csvr:schema ?schema ; csvr:schemaId ?schemaId ;
+            csvr:snapshot ?snap ; csvr:snapshotId ?sid ;
             csvr:file ?file ; qs:fileName ?name ; qs:sourceFile ?path ; qs:rowCount ?rows ;
             qs:fileSizeBytes ?size ; qs:modified ?ts .
       BIND(IRI("urn:queryrdf:namespace:default") AS ?ns)
       OPTIONAL { ?table qc:snapshot ?old }
+      OPTIONAL { ?table qc:schema ?oldSchema }
       OPTIONAL { ?table qc:currentSnapshot ?parent FILTER(?parent != ?snap) }
     }""" .
 

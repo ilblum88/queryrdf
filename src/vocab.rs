@@ -68,6 +68,7 @@ namespace!(
     FILE_NAME = "fileName", FORMAT = "format", FILE_SIZE_BYTES = "fileSizeBytes", COLUMN_CLASS = "Column",
     COLUMN = "column", NAME = "name", POSITION = "position", INFERRED_TYPE = "inferredType", ROW_COUNT = "rowCount",
     NULL_COUNT = "nullCount", MIN_VALUE = "minValue", MAX_VALUE = "maxValue", ROW_CLASS = "Row", ROW = "row", MODIFIED = "modified",
+    HEADER_SIGNATURE = "headerSignature",
 });
 
 namespace!(

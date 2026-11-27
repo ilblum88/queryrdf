@@ -350,6 +350,16 @@ pub fn lift_csv(bytes: &[u8], options: LiftOptions) -> Result<Vec<Triple>> {
             ));
         }
     }
+    let signature: Vec<String> = headers
+        .iter()
+        .zip(&types)
+        .map(|(name, t)| format!("{name}:{}", t.datatype().as_str()))
+        .collect();
+    out.push(Triple::new(
+        doc.clone(),
+        qs::HEADER_SIGNATURE,
+        Literal::from(signature.join(",")),
+    ));
     for (i, record) in records.iter().take(options.rows).enumerate() {
         let row: NamedOrBlankNode = BlankNode::default().into();
         out.push(Triple::new(doc.clone(), qs::ROW, row.clone()));
