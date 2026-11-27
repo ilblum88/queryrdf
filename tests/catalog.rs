@@ -333,3 +333,159 @@ fn cli_end_to_end() {
     let log = ok(&["log"]);
     assert_eq!(log.lines().count(), 4, "{log}");
 }
+
+#[test]
+fn shapes_extending_builtin_shapes_are_checked_merged() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cat = Catalog::open(dir.path().join("c.redb")).unwrap();
+    let mut cs = cat.changeset();
+    cs.added = namespace(&cat, "sales");
+    cat.commit(cs, "ns").unwrap();
+    let ext = format!(
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .
+         <https://w3id.org/queryrdf/shapes#NamespaceShape> sh:property [ sh:path <{QC}owner> ; sh:minCount 1 ] ."
+    );
+    assert!(!cat.add_shapes("ext", &ext, false).unwrap().conforms());
+    assert!(cat.shape_sets().unwrap().is_empty());
+}
+
+#[test]
+fn sparql_functions_in_rules_see_the_data_graph() {
+    let rules = graph::new_store();
+    graph::load_turtle(
+        &rules,
+        r#"@prefix sh: <http://www.w3.org/ns/shacl#> . @prefix ex: <http://ex/> .
+           ex:labelOf a sh:SPARQLFunction ; sh:parameter [ sh:path ex:node ] ;
+             sh:select "SELECT ?result WHERE { $node <http://ex/name> ?result }" .
+           ex:S a sh:NodeShape ; sh:targetNode ex:a ;
+             sh:rule [ a sh:SPARQLRule ;
+               sh:construct "CONSTRUCT { $this <http://ex/label> ?l } WHERE { $this <http://ex/name> ?n . BIND(<http://ex/labelOf>($this) AS ?l) }" ] ;
+             sh:rule [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate ex:label2 ;
+               sh:object [ ex:labelOf ( sh:this ) ] ] ."#,
+    )
+    .unwrap();
+    let rules = RuleSet::from_store(rules).unwrap();
+    let data = graph::new_store();
+    graph::load_turtle(&data, r#"<http://ex/a> <http://ex/name> "A" ."#).unwrap();
+    rules.execute(&data, RuleOptions::default()).unwrap();
+    let ask = |q: &str| graph::ask(&data, &format!("ASK {{ {q} }}"), &[]).unwrap();
+    assert!(ask(
+        r#"<http://ex/a> <http://ex/label> "A" ; <http://ex/label2> "A""#
+    ));
+}
+
+#[test]
+fn non_terminating_rules_fail_in_iterate_mode() {
+    let rules = graph::new_store();
+    graph::load_turtle(
+        &rules,
+        r#"@prefix sh: <http://www.w3.org/ns/shacl#> . @prefix ex: <http://ex/> .
+           ex:S a sh:NodeShape ; sh:targetSubjectsOf ex:n ;
+             sh:rule [ a sh:SPARQLRule ;
+               sh:construct "CONSTRUCT { $this <http://ex/n> ?m } WHERE { $this <http://ex/n> ?k . BIND(?k + 1 AS ?m) }" ] ."#,
+    )
+    .unwrap();
+    let rules = RuleSet::from_store(rules).unwrap();
+    let data = graph::new_store();
+    graph::load_turtle(&data, "<http://ex/a> <http://ex/n> 0 .").unwrap();
+    let err = rules
+        .execute(
+            &data,
+            RuleOptions {
+                iterate: true,
+                max_iterations: 5,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("fixpoint"), "{err}");
+}
+
+#[test]
+fn cli_source_edge_cases() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("c.redb");
+    let ok = |args: &[&str]| {
+        let (code, out, err) = cli(&db, args);
+        assert_eq!(code, 0, "{args:?}\n{out}\n{err}");
+        out
+    };
+
+    // Iceberg metadata whose child snapshot references an expired parent.
+    let mut meta: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/iceberg/v2.metadata.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    meta["snapshots"].as_array_mut().unwrap().remove(0);
+    let expired = dir.path().join("expired.json");
+    std::fs::write(&expired, meta.to_string()).unwrap();
+    ok(&[
+        "ingest",
+        expired.to_str().unwrap(),
+        "-r",
+        "rules/iceberg.ttl",
+    ]);
+
+    // CSV schema evolution keeps the earlier snapshot's schema; offsets order timestamps.
+    let v1 = dir.path().join("v1");
+    let v2 = dir.path().join("v2");
+    std::fs::create_dir_all(&v1).unwrap();
+    std::fs::create_dir_all(&v2).unwrap();
+    std::fs::write(
+        v1.join("events.csv"),
+        "id,ts\n1,2024-01-01T10:00:00+05:00\n2,2024-01-01T06:00:00Z\n",
+    )
+    .unwrap();
+    std::fs::write(
+        v2.join("events.csv"),
+        "id,ts,kind\n3,2024-01-02T00:00:00Z,a\n",
+    )
+    .unwrap();
+    ok(&[
+        "ingest",
+        v1.join("events.csv").to_str().unwrap(),
+        "-r",
+        "rules/csv.ttl",
+    ]);
+    ok(&[
+        "ingest",
+        v2.join("events.csv").to_str().unwrap(),
+        "-r",
+        "rules/csv.ttl",
+    ]);
+    let out = ok(&[
+        "query",
+        "SELECT ?n (COUNT(?f) AS ?fields) WHERE { ?s qc:recordCount ?n . ?snap qc:dataFile ?s ; qc:schema/qc:field ?f } GROUP BY ?n ORDER BY ?n",
+    ]);
+    let rows: Vec<&str> = out.lines().skip(2).take(2).map(|l| l.trim()).collect();
+    assert_eq!(rows, ["1 | 3", "2 | 2"], "{out}");
+    let out = ok(&[
+        "query",
+        "SELECT ?min WHERE { ?st qc:column/qc:name \"ts\" ; qc:minValue ?min }",
+    ]);
+    assert!(out.contains("2024-01-01T10:00:00+05:00"), "{out}");
+
+    // RDF sources keep their blank nodes.
+    let ttl = dir.path().join("ns.ttl");
+    std::fs::write(&ttl, "[] <http://ex/label> \"blank\" .").unwrap();
+    let rules = dir.path().join("rdf.ttl");
+    std::fs::write(
+        &rules,
+        r#"@prefix sh: <http://www.w3.org/ns/shacl#> .
+           <urn:r> a sh:NodeShape ; sh:targetSubjectsOf <http://ex/label> ;
+             sh:rule [ a sh:TripleRule ; sh:subject sh:this ; sh:predicate <http://ex/copy> ;
+                       sh:object [ sh:path <http://ex/label> ] ] ."#,
+    )
+    .unwrap();
+    let out = ok(&[
+        "ingest",
+        ttl.to_str().unwrap(),
+        "-r",
+        rules.to_str().unwrap(),
+    ]);
+    assert!(out.contains("(+1 "), "{out}");
+}
