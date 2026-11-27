@@ -163,14 +163,16 @@ impl RuleSet {
         &self.rules
     }
 
-    /// The rules graph's `sh:SPARQLFunction`s, exposed as custom SPARQL functions.
-    pub fn sparql_functions(&self) -> Vec<(NamedNode, CustomFn)> {
+    /// The rules graph's `sh:SPARQLFunction`s, exposed as custom SPARQL functions evaluated
+    /// against `data`.
+    pub fn sparql_functions(&self, data: &Store) -> Vec<(NamedNode, CustomFn)> {
         self.functions
             .iter()
             .map(|(name, f)| {
                 let f = f.clone();
+                let data = data.clone();
                 let custom: CustomFn =
-                    Arc::new(move |args: &[Term]| f.call(&graph::EMPTY, args).ok().flatten());
+                    Arc::new(move |args: &[Term]| f.call(&data, args).ok().flatten());
                 (name.clone(), custom)
             })
             .collect()
@@ -178,7 +180,7 @@ impl RuleSet {
 
     /// Executes the rules, adding inferred triples to `data`.
     pub fn execute(&self, data: &Store, options: RuleOptions) -> Result<Inference> {
-        let functions = self.sparql_functions();
+        let functions = self.sparql_functions(data);
         let mut result = Inference::default();
         let mut produced_seen = HashSet::new();
         loop {
