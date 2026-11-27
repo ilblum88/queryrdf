@@ -214,8 +214,14 @@ impl RuleSet {
                     }
                 }
             }
-            if !options.iterate || new_triples == 0 || result.iterations >= options.max_iterations {
+            if !options.iterate || new_triples == 0 {
                 break;
+            }
+            if result.iterations >= options.max_iterations {
+                bail!(
+                    "rules did not reach a fixpoint after {} iterations",
+                    options.max_iterations
+                );
             }
         }
         Ok(result)
